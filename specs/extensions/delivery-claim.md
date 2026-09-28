@@ -43,6 +43,10 @@ A claim's content fields, all of which are covered by `claimId` and `signature`:
 | `externalRefs` | object | Optional | Unverified pointers into external identity/authority/dispute systems (e.g. an ERC-8004 agent id, an AP2 mandate, an LCP dispute context) |
 | `priorClaimId` | string | Optional | The `claimId` of this same buyer's immediately previous claim about this same seller; forms a per-buyer, per-seller signed chain |
 
+`timestamp` MUST be UTC, millisecond precision, with a trailing `Z` (`YYYY-MM-DDTHH:mm:ss.sssZ`), matching the worked example in §9. `get_delivery_history` returns claims in the order this field sorts; a looser format admits mixed precisions and offsets that sort inconsistently, silently reordering the history the whole signal in §3 rests on.
+
+`measured` and `externalRefs` do not yet have a worked example anywhere in the reference implementation's public fixture output (golden vectors, completeness fixture, or the live on-chain examples in §9); both are spec-only today, honestly flagged rather than left for a reader to discover.
+
 Full field-level rules (canonical decimal/timestamp formats, size bounds, and the exact canonicalization procedure) are in the reference implementation's `schema.ts` and are summarized in §9.
 
 **5. Computing the Claim Identifier and Signature**
@@ -52,7 +56,9 @@ claimId  = "0x" + sha256( canonicalize(content) )
 signature = EIP-191 personal_sign(claimId) by the buyer's key
 ```
 
-`canonicalize()` is deterministic JSON serialization with object keys sorted recursively (array order is preserved). `content` is every field in §4 except `claimId` and `signature` themselves.
+`canonicalize()` is deterministic JSON serialization with object keys sorted recursively (array order is preserved). `content` is every field in §4 except `claimId` and `signature` themselves. `sellerAddress` and `buyerAddress` MUST be lowercased before serialization. Without this rule, the same claim content with a checksummed (EIP-55 mixed-case) address versus a lowercased one produces two different `claimId` values from two implementations that both believe they are compliant, and a signature over one does not recover to the other.
+
+`personal_sign` in §5's formula signs the ASCII string form of `claimId`, the `0x`-prefixed, 66-character lowercase hex string, not the 32 raw digest bytes. Both readings are reasonable from the formula alone and they produce different, mutually non-verifying signatures over the same underlying digest, so this is stated explicitly rather than left to an implementer's choice of signing library default.
 
 This intentionally uses plain EIP-191 `personal_sign`, not EIP-712 typed data, to keep the signing surface small. A later EIP-712 upgrade (mirroring the pattern in the Offer and Receipt Extension, §3.2 of that document) is possible additively without invalidating existing claims, since the claim identifier is a content hash, not a signature-scheme-specific construct.
 
@@ -61,6 +67,8 @@ This intentionally uses plain EIP-191 `personal_sign`, not EIP-712 typed data, t
 `settlementRef` is a free-text pointer to an already-completed settlement; this format does not verify it against a facilitator, a chain, or the `SettlementResponse` that produced it. This is a known, explicitly documented limitation, not an oversight (see §8).
 
 One concrete, incremental strengthening this proposal does make: x402's own `SettlementResponse` (as used by the Offer and Receipt Extension, §5.2) already carries a `payer` field. Where the underlying settlement is inspectable, a verifier MUST confirm that `claim.buyerAddress` matches the `payer` of the settlement named by `settlementRef`, in addition to the claim's own signature check. An optional check here is skippable by construction, and skipping it is exactly the gap an attacker would use. This binds the claim to the correct *paying party* for a real settlement. It does **not** bind the claim to a specific *unit of work* (that is the problem the settlement-anchor discussion in #3379 is solving from the seller/execution side), and it does **not** give a false `delivered: no` or `delivered: yes` any cost, which remains open (§8).
+
+`settlementRef` resolves differently depending on which of its two forms (§4: an x402 payment reference, or an on-chain transaction hash) is used, and the two forms do not carry the same guarantee. The transaction-hash branch is well-defined for a direct payer-to-seller transfer, but for a settlement routed through a sponsor, paymaster, or router contract, the transaction's `from` is the relayer, not the buyer, so a naive lookup of `payer` from the transaction itself fails a legitimate claim. This MUST is therefore scoped to whichever branch and settlement shape actually exposes a `payer` distinct from the transaction sender; a settlement where that is not resolvable is not covered by this check and is treated per §8, not silently passed or silently failed.
 
 **7. Publishing and Discovery**
 
@@ -76,15 +84,16 @@ This format does not mandate a publication substrate. A claim is valid wherever 
 Stated plainly, because a claimed limitation that is actually tested is worth more than a claim of completeness that is not.
 
 - **No cost to a false claim.** A buyer can sign an untrue `delivered: no` or `delivered: yes` claim at zero cost. Nine independently designed mitigations (active settlement verification, economic bonds, time-locked maturation, third-party staked capital, and others) were each tested against the reference implementation and killed, for one of two structural reasons: the check was optional and therefore skippable, or it required ranking one claim above another, which this format deliberately refuses to do (§3). Full writeup, including all nine designs and why each failed: [tokenizen.nl/en/notes/nine-ways-to-fake-a-delivery-claim](https://tokenizen.nl/en/notes/nine-ways-to-fake-a-delivery-claim). This remains open.
-- **Completeness, not just findability.** A source that omits some of a seller's claims cannot be forced to reveal them. `priorClaimId` chaining (§4) detects a hidden *middle* claim in an otherwise-visible chain; it does not detect a hidden most-recent claim or an entirely hidden buyer.
+- **Completeness, not just findability.** A source that omits some of a seller's claims cannot be forced to reveal them. `priorClaimId` chaining (§4) detects a hidden *middle* claim in an otherwise-visible chain; it does not detect a hidden most-recent claim or an entirely hidden buyer. See §10 for how a broken or forked chain is reported.
 - **`settlementRef` is not cryptographically bound to the claim's other fields.** See §6.
+- **The §6 payer-match MUST does not cover every settlement shape.** It depends on a resolution path that exists for a direct payer-to-seller transaction but not for one routed through a sponsor, paymaster, or router contract. See §6.
 
 **9. Example**
 
 ```json
 {
-  "sellerAddress": "0x209693bc6afc0c5328ba36faf03c514ef312287",
-  "buyerAddress": "0x857b06519e91e3a54538791bdbb0e22373e36b6",
+  "sellerAddress": "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a",
+  "buyerAddress": "0x1563915e194d8cfba1943570603f7606a3115508",
   "assetType": "gpu-hours",
   "promisedSpec": "8x H100, 2 hours, us-east",
   "delivered": "partial",
@@ -95,6 +104,8 @@ Stated plainly, because a claimed limitation that is actually tested is worth mo
   "signature": "0x1234567890abcdef..."
 }
 ```
+
+`sellerAddress` and `buyerAddress` above are valid 20-byte addresses (40 hex characters), already lowercased per §5, derived from the trivial test private keys `0x11..11` and `0x22..22` respectively so anyone can regenerate and check them; they are not real wallets and hold nothing.
 
 Live, on-chain examples (EAS attestations, decodable by anyone without this project's code), on three independent chains:
 
@@ -120,7 +131,8 @@ Each attestation's `data` field is ABI-encoded per the EAS schema `bytes32 claim
 1. Recompute `claimId` from the content fields per §5 and confirm it matches.
 2. Recover the signer from `signature` over `claimId` and confirm it equals `buyerAddress`.
 3. Where the underlying settlement is inspectable, confirm `buyerAddress` matches the settlement's `payer` (§6).
-4. Treat every other field as an unverified assertion by the buyer, not a proven fact.
+4. Where `priorClaimId` is present: the referenced claim MUST exist in the gathered set and independently verify per steps 1-2. It being signed means the buyer commits to it as part of `claimId` (§4), but that commitment is not itself proof it was ever recorded; treat a missing or unverifiable `priorClaimId` as an *incomplete* chain (§8), not as grounds to reject the claim it appears in. Two distinct claims from the same buyer sharing one `priorClaimId` is a fork, not a validity failure; report both.
+5. Treat every other field as an unverified assertion by the buyer, not a proven fact.
 
 **11. Security Considerations**
 
