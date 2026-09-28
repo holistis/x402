@@ -60,7 +60,7 @@ This intentionally uses plain EIP-191 `personal_sign`, not EIP-712 typed data, t
 
 `settlementRef` is a free-text pointer to an already-completed settlement; this format does not verify it against a facilitator, a chain, or the `SettlementResponse` that produced it. This is a known, explicitly documented limitation, not an oversight (see §8).
 
-One concrete, incremental strengthening this proposal does make: x402's own `SettlementResponse` (as used by the Offer and Receipt Extension, §5.2) already carries a `payer` field. Where the underlying settlement is inspectable, a verifier SHOULD confirm that `claim.buyerAddress` matches the `payer` of the settlement named by `settlementRef`, in addition to the claim's own signature check. This binds the claim to the correct *paying party* for a real settlement. It does **not** bind the claim to a specific *unit of work* (that is the problem the settlement-anchor discussion in #3379 is solving from the seller/execution side), and it does **not** give a false `delivered: no` or `delivered: yes` any cost, which remains open (§8).
+One concrete, incremental strengthening this proposal does make: x402's own `SettlementResponse` (as used by the Offer and Receipt Extension, §5.2) already carries a `payer` field. Where the underlying settlement is inspectable, a verifier MUST confirm that `claim.buyerAddress` matches the `payer` of the settlement named by `settlementRef`, in addition to the claim's own signature check. An optional check here is skippable by construction, and skipping it is exactly the gap an attacker would use. This binds the claim to the correct *paying party* for a real settlement. It does **not** bind the claim to a specific *unit of work* (that is the problem the settlement-anchor discussion in #3379 is solving from the seller/execution side), and it does **not** give a false `delivered: no` or `delivered: yes` any cost, which remains open (§8).
 
 **7. Publishing and Discovery**
 
@@ -98,6 +98,15 @@ Stated plainly, because a claimed limitation that is actually tested is worth mo
 
 Live, on-chain examples (EAS attestations on Base mainnet, decodable by anyone without this project's code):
 [delivered=yes](https://base.easscan.org/attestation/view/0x81a55d54452b2cf8bdda7918f63a27bf9ff79e5025b485f7316aae6259288ccc) · [delivered=no](https://base.easscan.org/attestation/view/0xe736b005cbcb54f8f196ac64ef09d75d939c8a18c0d5d9670b5c5025c07398c4)
+
+**9.1 Decoding the on-chain examples, without this project's code**
+
+Each attestation's `data` field is ABI-encoded per the EAS schema `bytes32 claimId,string claim`, where `claim` is the full claim object above as a JSON string. To decode with only a generic EVM library:
+
+1. Read the attestation's raw `data` bytes. On easscan.org, open the attestation link above and use "Decoded Data", or call EAS's `getAttestation(uid)` directly against the EAS contract on Base (`0x4200000000000000000000000000000000000021`) and read the returned struct's `data` field.
+2. ABI-decode that `data` value as `(bytes32, string)`. Any standard ABI decoder works, for example in ethers.js: `AbiCoder.defaultAbiCoder().decode(["bytes32", "string"], data)`.
+3. The first value is the claim's `claimId` (should equal the `claimId` field inside the second value). The second value is the claim, `JSON.parse()` it to get the object in §4.
+4. Verify it per §10, using only the JSON and the recovered signer, no dependency on this repository.
 
 **10. Verification**
 
