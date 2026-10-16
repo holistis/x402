@@ -459,17 +459,18 @@ authorizationCommitment = "0x" || hex( SHA-256( "x402-receipt-authorization/0" |
 
 - The salt MUST be exactly 32 bytes from a cryptographically secure random source, generated independently for each payment.
 - The salt MUST NOT be derived from the identifier, the payer, or any other field of the receipt, offer or payment. The authorizer is indexed in the on-chain log, so a receipt holder can list every identifier that payer has consumed with one log query, and that list is usually short. A salt computable from public data therefore reduces the commitment to publishing the identifier.
-- The salt MUST NOT appear in the signed payload. Servers return it to the client as an unsigned field next to the receipt, in the same way §4.1.1 handles `acceptIndex`:
+- The salt MUST NOT appear in the signed payload. Servers return it alongside the receipt, at:
 
 ```
 extensions["offer-receipt"].info.authorizationSalt   // "0x" + 64 hex characters
 ```
 
-- Clients that need the link later MUST store the salt with the receipt. Forwarding a receipt without its salt forwards no settlement link.
+- The salt MUST NOT be placed as a field of the receipt object itself, signed or unsigned. Forwarding the receipt must not forward the link (§5.6.5). It is unsigned in the same sense §4.1.1 describes for `acceptIndex`, but it does not share that field's placement.
+- Clients that need the link later MUST store the salt, and the `asset` of the `accepts` entry they paid (§5.6.4), with the receipt. Forwarding a receipt without its salt forwards no settlement link.
 
 **5.6.4 Linking a receipt to its settlement (`eip3009`)**
 
-A verifier holding the receipt, its salt and the asset:
+A verifier holding the receipt, its salt and the asset. `asset` is the token contract of the `accepts` entry that was paid (§5.6.2); the receipt does not carry it. An in-session client has it. A later verifier needs the offer, the `accepts` entry, or the `asset` value stored with the salt (§5.6.3). Holding only the receipt and the salt is not enough to link. The verifier:
 
 1. Takes `authorizer` from the receipt's signed `payer` field, never from a value supplied alongside the salt.
 2. Queries `AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)` on `asset` for that authorizer.
