@@ -450,7 +450,7 @@ authorizationCommitment = "0x" || hex( SHA-256( "x402-receipt-authorization/0" |
 | `authorizationMethod` | `asset` | `authorizer` | `identifier` (32 bytes) |
 |---|---|---|---|
 | `eip3009` | token contract of the accepted payment requirements (20 bytes) | `from` of the authorization (20 bytes) | the ERC-3009 `nonce` |
-| `svm-memo` | the SPL token mint of the accepted payment requirements (32 bytes) | the payer account (32 bytes) | `SHA-256` of the Memo instruction data, as transmitted |
+| `svm-memo` | the SPL token mint of the accepted payment requirements (32 bytes) | the payer account (32 bytes) | `SHA-256` of the Memo instruction data: the UTF-8 bytes of the memo string, before any base58 or base64 encoding |
 
 - Every field after `method` has a fixed length, so the preimage is unambiguous. Each method's row fixes the lengths of `asset` and `authorizer`. `identifier` and `salt` are always exactly 32 bytes, for every method. Hex inputs are case-insensitive and are decoded to bytes before hashing.
 - A rail whose native identifier is not exactly 32 bytes (for example a variable-length memo) MUST define `identifier` as `SHA-256(native identifier bytes)`. Its link procedure hashes each candidate the same way before recomputing the commitment. A new method never adds a variable-length field to the preimage.
@@ -489,9 +489,22 @@ The server holds the value before settlement either way: it chose `extra.memo` i
 A verifier holding the receipt, its salt and the mint:
 
 1. Takes `authorizer` from the receipt's signed `payer` field, as above.
-2. Lists that account's transactions (`getSignaturesForAddress`, then one read per signature) and collects the Memo instruction data from each. With `jsonParsed` encoding the memo appears as an instruction with `program: "spl-memo"` and the memo string in `parsed`.
+2. Lists that account's transactions (`getSignaturesForAddress`, then one read per signature) and collects the Memo instruction data from each. With `jsonParsed` encoding the memo appears as an instruction with `program: "spl-memo"` and the memo string in `parsed`. That call returns at most 1000 signatures, so a verifier SHOULD page backwards from the receipt's `issuedAt` rather than from the head of the account's history: the settlement cannot be later than the receipt that attests to it, which bounds the scan without changing the result.
 3. Hashes each candidate memo to obtain `identifier` (§5.6.2) and recomputes the commitment. Exactly one MUST match.
 4. MAY read the matching transaction for amount and payee.
+
+Worked example for `svm-memo`, with the same purpose as the `eip3009` example in §5.4: it pins the encoding so a second implementation can check itself against a value rather than against prose.
+
+```
+mint   = EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v   (base58, 32 bytes)
+payer  = 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM   (base58, 32 bytes)
+memo   = "9f1c0b7a4e52d386"                              (16 UTF-8 bytes, as transmitted)
+salt   = 0x8f2b1d4e6a0c93758e1fb2a4c6d80e5f3719ab42cd6e805f1a3b7c9d2e4f6081
+
+authorizationCommitment = 0xffb8966ec1d5565bd0580f4f007d99c0162a88476f69b3e79cb95246b4175c59
+```
+
+Two independent implementations agree on this value from the text above: a TypeScript one and a Python one written against the spec without sharing code.
 
 **5.6.5 What it does and does not claim**
 
