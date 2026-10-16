@@ -447,11 +447,12 @@ authorizationCommitment = "0x" || hex( SHA-256( "x402-receipt-authorization/0" |
 - `"x402-receipt-authorization/0"` and `method` are ASCII bytes; `0x00` is a single zero byte.
 - `method` equals `authorizationMethod`. Defined values:
 
-| `authorizationMethod` | `asset` (20 bytes) | `authorizer` (20 bytes) | `identifier` (32 bytes) |
+| `authorizationMethod` | `asset` | `authorizer` | `identifier` (32 bytes) |
 |---|---|---|---|
-| `eip3009` | token contract of the accepted payment requirements | `from` of the authorization | the ERC-3009 `nonce` |
+| `eip3009` | token contract of the accepted payment requirements (20 bytes) | `from` of the authorization (20 bytes) | the ERC-3009 `nonce` |
+| `svm-memo` | the SPL token mint of the accepted payment requirements (32 bytes) | the payer account (32 bytes) | `SHA-256` of the Memo instruction data, as transmitted |
 
-- Every field after `method` has a fixed length, so the preimage is unambiguous. Hex inputs are case-insensitive and are decoded to bytes before hashing.
+- Every field after `method` has a fixed length, so the preimage is unambiguous. `identifier` is ALWAYS exactly 32 bytes. A rail whose native identifier is variable length commits to its SHA-256 rather than to the value itself; the link procedure then hashes each candidate before comparing. Hex inputs are case-insensitive and are decoded to bytes before hashing.
 - A payment whose rail has no identifier that the server holds before settlement MUST omit both fields (empty strings under EIP-712). The fields MUST NOT be reused with a different meaning. New rails are added as new `authorizationMethod` values with their own layout.
 
 **5.6.3 Salt**
@@ -476,6 +477,19 @@ A verifier holding the receipt, its salt and the asset:
 4. MAY confirm `authorizationState(authorizer, nonce)` returns `true`, and MAY read the matching transaction for amount and payee.
 
 A commitment made with any authorizer other than the receipt's `payer` opens to no nonce. It leaves the receipt unlinkable, as if the field were absent, and never produces a false link.
+
+**Linking a receipt to its settlement (`svm-memo`)**
+
+`scheme_exact_svm` requires a Memo instruction on every payment, carrying either the seller's `extra.memo` or a client-generated random nonce of at least 16 bytes, so that concurrent payments with identical parameters remain distinguishable. The server holds that value before settlement: it either chose `extra.memo` itself, or it receives the signed transaction before the sponsor submits it.
+
+A verifier holding the receipt, its salt and the mint:
+
+1. Takes `authorizer` from the receipt's signed `payer` field, as above.
+2. Lists that account's transactions on the rail (`getSignaturesForAddress`, then one read per signature) and collects the Memo instruction data from each. With `jsonParsed` encoding the memo appears as an instruction with `program: "spl-memo"` and the memo string in `parsed`.
+3. Recomputes the commitment for each candidate, hashing the memo bytes to obtain `identifier`. Exactly one MUST match.
+4. MAY read the matching transaction for amount and payee.
+
+Step 3 can find more than one candidate on this rail, which the `eip3009` method cannot produce. `extra.memo` is seller-defined and carries no uniqueness requirement; only the random-nonce branch guarantees one value per payment. A server that reuses one `extra.memo` across payments therefore produces one identifier for several settlements. Verifiers MUST treat more than one match as no link rather than selecting one, and servers that set `extra.memo` SHOULD make it unique per payment if they want their receipts to remain linkable.
 
 **5.6.5 What it does and does not claim**
 
