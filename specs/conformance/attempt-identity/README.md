@@ -23,7 +23,7 @@ The query string and body fields in `raw` are the wire form: `query` is the raw 
 
 ## Provenance
 
-The right values were computed by two implementations written separately, one in JavaScript and one in Python using only its standard library. They share no code and agree on all seven inputs. A third implementation, written separately in Python with only the standard library and run by ruiruii, matches all seven as well (https://github.com/x402-foundation/x402/pull/3776#issuecomment-6419277292). The files are copied byte for byte from `vectors/attempt-identity/` in https://github.com/holistis/agent-receipt-verify at commit `9a356bd`, which also holds the vectors that record what an implementation did rather than pin a value. All files carry their own `provenance` and `limits` fields.
+The right values were computed by two implementations written separately, one in JavaScript and one in Python using only its standard library. They share no code and agree on all seven inputs. A third implementation, written separately in Python with only the standard library and run by ruiruii, matches all seven as well (https://github.com/x402-foundation/x402/pull/3776#issuecomment-6419277292). The files are copied byte for byte from `vectors/attempt-identity/` in https://github.com/holistis/agent-receipt-verify at commit `023cc4f`, which also holds the vectors that record what an implementation did rather than pin a value. All files carry their own `provenance` and `limits` fields.
 
 ## Limits
 
